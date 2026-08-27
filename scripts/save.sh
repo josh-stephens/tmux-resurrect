@@ -220,8 +220,16 @@ dump_state() {
 
 dump_pane_contents() {
 	local pane_contents_area="$(get_tmux_option "$pane_contents_area_option" "$default_pane_contents_area")"
+	# @resurrect-capture-depth: cap SAVED scrollback lines per pane (0/unset =
+	# full history, upstream behavior). At 150 panes x 100k-line history the
+	# full capture cost 99s per save; capping the saved depth makes frequent
+	# autosaves affordable while live scrollback stays uncapped (mac-config#50).
+	local depth_cap="$(get_tmux_option "@resurrect-capture-depth" "0")"
 	dump_panes_raw |
 		while IFS=$d read line_type session_name window_number window_active window_flags pane_index pane_title dir pane_active pane_command pane_pid history_size; do
+			if [ "$depth_cap" -gt 0 ] 2>/dev/null && [ "$history_size" -gt "$depth_cap" ]; then
+				history_size="$depth_cap"
+			fi
 			capture_pane_contents "${session_name}:${window_number}.${pane_index}" "$history_size" "$pane_contents_area"
 		done
 }
