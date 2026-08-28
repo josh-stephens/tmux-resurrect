@@ -252,6 +252,15 @@ save_all() {
 	dump_windows >> "$resurrect_file_path"
 	dump_state   >> "$resurrect_file_path"
 	execute_hook "post-save-layout" "$resurrect_file_path"
+	# Never publish a truncated save: if the server dies mid-dump (2026-08-28:
+	# crash 20s into a save) the dump functions silently emit nothing, and
+	# without this guard `last` gets pointed at a file with pane lines but no
+	# window lines — restoring 157 nameless windows (mac-config#51).
+	if [ "$(grep -c '^window' "$resurrect_file_path")" -eq 0 ] || [ "$(grep -c '^pane' "$resurrect_file_path")" -eq 0 ]; then
+		rm -f "$resurrect_file_path"
+		display_message "tmux-resurrect: save aborted — dump was incomplete (server unresponsive?)"
+		return 1
+	fi
 	if files_differ "$resurrect_file_path" "$last_resurrect_file"; then
 		ln -fs "$(basename "$resurrect_file_path")" "$last_resurrect_file"
 	else
