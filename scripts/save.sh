@@ -243,9 +243,19 @@ remove_old_backups() {
 		find "${files[@]}" -type f -mtime "+${delete_after}" -exec rm -v "{}" \; > /dev/null
 }
 
+# The pid of the server on the default socket. A save must describe ONE
+# server: if it is killed mid-save and another starts (the #305 cutover,
+# 2026-10-04), the rest of the dump reads the NEW, half-restored server.
+# That save recorded 59 windows, all named `cat`, and was published as
+# `last` (mac-config#310).
+server_pid() {
+	tmux list-sessions -F '#{pid}' 2>/dev/null | head -1
+}
+
 save_all() {
 	local resurrect_file_path="$(resurrect_file_path)"
 	local last_resurrect_file="$(last_resurrect_file)"
+	local pid_at_start="$(server_pid)"
 	mkdir -p "$(resurrect_dir)"
 	fetch_and_dump_grouped_sessions > "$resurrect_file_path"
 	dump_panes   >> "$resurrect_file_path"
@@ -261,6 +271,11 @@ save_all() {
 		display_message "tmux-resurrect: save aborted — dump was incomplete (server unresponsive?)"
 		return 1
 	fi
+	if [ -z "$pid_at_start" ] || [ "$(server_pid)" != "$pid_at_start" ]; then
+		rm -f "$resurrect_file_path"
+		display_message "tmux-resurrect: save aborted — the tmux server changed during the save"
+		return 1
+	fi
 	if files_differ "$resurrect_file_path" "$last_resurrect_file"; then
 		ln -fs "$(basename "$resurrect_file_path")" "$last_resurrect_file"
 	else
@@ -269,8 +284,11 @@ save_all() {
 	if capture_pane_contents_option_on; then
 		mkdir -p "$(pane_contents_dir "save")"
 		dump_pane_contents
-		pane_contents_create_archive
-		rm "$(pane_contents_dir "save")"/*
+		# Same check before the archive: a new server's panes are not this save's.
+		if [ "$(server_pid)" = "$pid_at_start" ]; then
+			pane_contents_create_archive
+		fi
+		rm -f "$(pane_contents_dir "save")"/*
 	fi
 	remove_old_backups
 	execute_hook "post-save-all"
